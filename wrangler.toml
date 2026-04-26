@@ -1,0 +1,28 @@
+name = "backway"
+main = "src/index.tsx"
+compatibility_date = "2026-03-18"
+
+[[r2_buckets]]
+binding = "SNAPSHOTS"
+bucket_name = "backway-snapshots"
+preview_bucket_name = "backway-snapshots-preview"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "backway"
+database_id = "53a2e1b2-d591-406a-8ea2-49699fa68989"
+migrations_dir = "drizzle"
+
+[browser]
+binding = "BROWSER"
+
+[vars]
+MAX_ASSET_SIZE_BYTES = "10485760"
+MAX_TOTAL_ASSET_BYTES = "104857600"
+MAX_ASSET_COUNT = "300"
+RESPECT_ROBOTS = "false"
+RATE_LIMIT_WINDOW_MS = "60000"
+RATE_LIMIT_MAX_REQUESTS = "10"
+
+[observability]
+enabled = true

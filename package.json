@@ -1,0 +1,26 @@
+{
+  "name": "backway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "cf-typegen": "wrangler types",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply backway --local",
+    "db:migrate:remote": "wrangler d1 migrations apply backway --remote"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.44.0",
+    "hono": "^4.7.6",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250303.0",
+    "@types/node": "^22.13.14",
+    "drizzle-kit": "^0.31.1",
+    "typescript": "^5.8.2",
+    "wrangler": "^4.6.0"
+  }
+}
