@@ -8,6 +8,8 @@ export interface Env {
   RESPECT_ROBOTS?: string;
   RATE_LIMIT_WINDOW_MS?: string;
   RATE_LIMIT_MAX_REQUESTS?: string;
+  ASSET_FETCH_TIMEOUT_MS?: string;
+  PROCESSING_DEADLINE_MS?: string;
 }
 
 export type SnapshotStatus =

@@ -60,14 +60,23 @@ async function fetchHtml(url: string) {
   return { html, finalUrl: response.url };
 }
 
-async function fetchAsset(url: string, maxAssetSizeBytes: number) {
-  const response = await fetch(url, {
-    headers: {
-      accept: '*/*',
-      'user-agent': 'Mozilla/5.0 (compatible; BackwayBot/0.1; +https://backway.local)',
-    },
-    redirect: 'follow',
-  });
+async function fetchAsset(url: string, maxAssetSizeBytes: number, timeoutMs: number) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort('asset fetch timed out'), timeoutMs);
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: {
+        accept: '*/*',
+        'user-agent': 'Mozilla/5.0 (compatible; BackwayBot/0.1; +https://backway.local)',
+      },
+      redirect: 'follow',
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
   if (!response.ok) throw new Error(`asset returned ${response.status}`);
 
   const contentType = getContentType(response);
@@ -133,6 +142,15 @@ export async function processSnapshot(env: Env, snapshotId: string, inputUrl: st
   const config = getConfig(env);
   const { url } = normalizeUrl(inputUrl);
   const storedAssets: StoredAsset[] = [];
+  const processingDeadline = Date.now() + config.processingDeadlineMs;
+  let stoppedEarlyReason: string | undefined;
+
+  const hasProcessingBudget = (minimumMs = 1000) => Date.now() + minimumMs < processingDeadline;
+  const markStoppedEarly = async (reason: string) => {
+    if (stoppedEarlyReason) return;
+    stoppedEarlyReason = reason;
+    await createCapture(env, snapshotId, 'budget', 'partial', reason);
+  };
 
   await updateSnapshotStatus(env, snapshotId, 'processing');
 
@@ -155,8 +173,15 @@ export async function processSnapshot(env: Env, snapshotId: string, inputUrl: st
       if (fetchedAssetUrls.has(assetUrl)) return;
       fetchedAssetUrls.add(assetUrl);
 
+      if (!hasProcessingBudget(1500)) {
+        await markStoppedEarly('processing time budget reached before all assets were fetched');
+        return;
+      }
+
       try {
-        const { buffer, contentType, finalUrl: assetFinalUrl } = await fetchAsset(assetUrl, config.maxAssetSizeBytes);
+        const remainingBudgetMs = Math.max(1000, processingDeadline - Date.now() - 1000);
+        const assetTimeoutMs = Math.min(config.assetFetchTimeoutMs, remainingBudgetMs);
+        const { buffer, contentType, finalUrl: assetFinalUrl } = await fetchAsset(assetUrl, config.maxAssetSizeBytes, assetTimeoutMs);
         if (totalBytes + buffer.byteLength > config.maxTotalAssetBytes) {
           await createCapture(env, snapshotId, 'fetch_asset', 'partial', `${assetUrl}: total asset byte cap reached`);
           return;
@@ -167,7 +192,7 @@ export async function processSnapshot(env: Env, snapshotId: string, inputUrl: st
           const css = new TextDecoder().decode(buffer);
           const cssReferences = extractCssAssetReferences(css, assetFinalUrl);
           for (const cssReference of cssReferences) {
-            if (queuedAssetUrls.size >= config.maxAssetCount) break;
+            if (queuedAssetUrls.size >= config.maxAssetCount || !hasProcessingBudget(1500)) break;
             if (!queuedAssetUrls.has(cssReference.resolved)) {
               queuedAssetUrls.add(cssReference.resolved);
               await storeAsset(cssReference.resolved);
@@ -177,7 +202,7 @@ export async function processSnapshot(env: Env, snapshotId: string, inputUrl: st
         } else if (/(?:application|text)\/javascript|application\/x-javascript/.test(contentType)) {
           const js = new TextDecoder().decode(buffer);
           for (const jsReference of extractJavaScriptAssetUrls(js, assetFinalUrl)) {
-            if (queuedAssetUrls.size >= config.maxAssetCount) break;
+            if (queuedAssetUrls.size >= config.maxAssetCount || !hasProcessingBudget(1500)) break;
             if (!queuedAssetUrls.has(jsReference)) {
               queuedAssetUrls.add(jsReference);
               await storeAsset(jsReference);
@@ -210,7 +235,13 @@ export async function processSnapshot(env: Env, snapshotId: string, inputUrl: st
       }
     }
 
-    for (const assetUrl of assetUrls) await storeAsset(assetUrl);
+    for (const assetUrl of assetUrls) {
+      if (!hasProcessingBudget(1500)) {
+        await markStoppedEarly('processing time budget reached before all assets were fetched');
+        break;
+      }
+      await storeAsset(assetUrl);
+    }
 
     const rewrittenHtml = rewriteHtmlWithAssets(html, assetReferences, replacements, finalUrl);
     const canStoreHtml = rewrittenHtml.trim().length > 0;
@@ -240,7 +271,7 @@ export async function processSnapshot(env: Env, snapshotId: string, inputUrl: st
               status: canStoreHtml ? 'completed' : 'screenshot_only',
               htmlStored: canStoreHtml,
               screenshotStored: true,
-              fallbackReason,
+              fallbackReason: [fallbackReason, stoppedEarlyReason].filter(Boolean).join('; ') || undefined,
             },
             storedAssets,
           );
@@ -263,7 +294,7 @@ export async function processSnapshot(env: Env, snapshotId: string, inputUrl: st
         status: canStoreHtml ? 'completed' : 'failed',
         htmlStored: canStoreHtml,
         screenshotStored: false,
-        fallbackReason: fallbackReason ?? undefined,
+        fallbackReason: [fallbackReason, stoppedEarlyReason].filter(Boolean).join('; ') || undefined,
       },
       storedAssets,
     );

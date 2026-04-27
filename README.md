@@ -71,12 +71,39 @@ The Drizzle config can read `CLOUDFLARE_D1_DATABASE_ID`, `CLOUDFLARE_ACCOUNT_ID`
 
 ## Deploy
 
-1. Create the D1 database and R2 bucket in Cloudflare.
-2. Update `wrangler.toml` with the real `database_id` and bucket names.
-3. Apply remote migrations:
+Deployments use Wrangler to publish the Worker to Cloudflare.
+
+1. Install dependencies:
+   - `npm install`
+2. Log in to Cloudflare if you have not already:
+   - `npx wrangler login`
+3. Make sure the Cloudflare resources in `wrangler.toml` exist:
+   - D1 database: `backway`
+   - R2 bucket: `backway-snapshots`
+   - Optional preview R2 bucket: `backway-snapshots-preview`
+   - Optional Browser Rendering binding: `BROWSER`
+4. If the D1 database does not exist yet, create it:
+   - `npx wrangler d1 create backway`
+   - Copy the returned `database_id` into the `[[d1_databases]]` section of `wrangler.toml`.
+5. If the R2 bucket does not exist yet, create it:
+   - `npx wrangler r2 bucket create backway-snapshots`
+6. Optionally create the preview R2 bucket:
+   - `npx wrangler r2 bucket create backway-snapshots-preview`
+7. Apply remote D1 migrations:
    - `npm run db:migrate:remote`
-4. Deploy:
+8. Deploy the Worker:
    - `npm run deploy`
+
+Quick deploy sequence once the Cloudflare resources already exist:
+
+```bash
+npm install
+npx wrangler login
+npm run db:migrate:remote
+npm run deploy
+```
+
+After deployment, Wrangler prints the deployed Worker URL, for example `https://backway.<your-subdomain>.workers.dev`.
 
 ## Notes
 
