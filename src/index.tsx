@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { createSnapshotRecord, getSnapshotDetails, processSnapshot } from './capture';
 import { isRateLimited } from './lib/rate-limit';
+import { securityHeaders, setReplaySecurityHeaders } from './lib/security';
 import { getAsset, getScreenshot, getSnapshotHtml, getSnapshotMetadata, getSnapshotResource } from './lib/storage';
 import { normalizeUrl, shouldSkipUrl } from './lib/url';
 import type { Env } from './types';
@@ -11,8 +12,10 @@ import { LandingPage, ScreenshotPage } from './ui';
 const app = new Hono<{ Bindings: Env }>();
 
 const snapshotSchema = z.object({
-  url: z.string().min(1),
+  url: z.string().min(1).max(2048),
 });
+
+app.use('*', securityHeaders);
 
 app.get('/', (c) => c.html(<LandingPage />));
 
@@ -74,6 +77,7 @@ app.get('/snapshot/:id/view', async (c) => {
   const snapshotId = c.req.param('id');
   const html = await getSnapshotHtml(c.env, snapshotId);
   if (html) {
+    setReplaySecurityHeaders(c);
     c.header('content-type', 'text/html; charset=utf-8');
     return c.body(await html.text());
   }
@@ -89,6 +93,7 @@ app.get('/snapshot/:id/view', async (c) => {
 app.get('/snapshot/:id/screenshot', async (c) => {
   const screenshot = await getScreenshot(c.env, c.req.param('id'));
   if (!screenshot) return c.json({ error: 'not_found' }, 404);
+  setReplaySecurityHeaders(c);
   c.header('content-type', 'image/png');
   return c.body(await screenshot.arrayBuffer());
 });
@@ -99,6 +104,7 @@ app.get('/snapshot/:id/resource/*', async (c) => {
   const object = await getSnapshotResource(c.env, c.req.param('id'), resourcePath);
   if (!object) return c.json({ error: 'not_found' }, 404);
 
+  setReplaySecurityHeaders(c);
   c.header('content-type', object.httpMetadata?.contentType ?? 'application/octet-stream');
   c.header('cache-control', 'public, immutable, max-age=31536000');
   return c.body(await object.arrayBuffer());
@@ -109,6 +115,7 @@ app.get('/asset/:hash', async (c) => {
   if (!object) return c.json({ error: 'not_found' }, 404);
 
   const contentType = object.httpMetadata?.contentType ?? 'application/octet-stream';
+  setReplaySecurityHeaders(c);
   c.header('content-type', contentType);
   c.header('cache-control', 'public, immutable, max-age=31536000');
   return c.body(await object.arrayBuffer());

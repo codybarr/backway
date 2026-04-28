@@ -15,7 +15,7 @@ import { getContentType, isAllowedAssetContentType } from './lib/http';
 import { createId } from './lib/id';
 import { isRobotsAllowed } from './lib/robots';
 import { putAsset, putScreenshot, putSnapshotHtml, putSnapshotMetadata, putSnapshotResource } from './lib/storage';
-import { normalizeUrl, shouldSkipUrl } from './lib/url';
+import { normalizeUrl, sanitizeUrlForStorage, shouldSkipUrl } from './lib/url';
 import type { Env, SnapshotMetadata, SnapshotStatus, StoredAsset } from './types';
 
 async function updateSnapshotStatus(env: Env, snapshotId: string, status: SnapshotStatus) {
@@ -105,14 +105,21 @@ async function tryCaptureScreenshot(env: Env, targetUrl: string) {
   return new Uint8Array(await response.arrayBuffer());
 }
 
+function getReplayResourcePath(url: URL) {
+  const pathname = url.pathname || '/';
+  if (!url.search) return pathname;
+  return `${pathname}/__backway_query__/${encodeURIComponent(url.search.slice(1))}`;
+}
+
 function prioritizeAssetUrls(urls: string[]) {
   const score = (url: string) => {
-    const pathname = new URL(url).pathname.toLowerCase();
+    const parsed = new URL(url);
+    const pathname = parsed.pathname.toLowerCase();
     if (/\.css$/.test(pathname)) return 0;
     if (/\.(js|mjs)$/.test(pathname)) return 1;
     if (/\.(woff2?|ttf|otf)$/.test(pathname)) return 2;
     if (/\.(svg|ico)$/.test(pathname)) return 3;
-    if (/\.(png|jpe?g|webp|avif|gif)$/.test(pathname)) return 4;
+    if (/\.(png|jpe?g|webp|avif|gif)$/.test(pathname) || parsed.searchParams.get('f')?.startsWith('webp')) return 4;
     return 5;
   };
   return [...urls].sort((a, b) => score(a) - score(b));
@@ -140,7 +147,7 @@ function extractJavaScriptAssetUrls(js: string, baseUrl: string) {
 export async function processSnapshot(env: Env, snapshotId: string, inputUrl: string) {
   const db = getDb(env);
   const config = getConfig(env);
-  const { url } = normalizeUrl(inputUrl);
+  const { url, normalized: safeInputUrl } = normalizeUrl(inputUrl);
   const storedAssets: StoredAsset[] = [];
   const processingDeadline = Date.now() + config.processingDeadlineMs;
   let stoppedEarlyReason: string | undefined;
@@ -183,7 +190,7 @@ export async function processSnapshot(env: Env, snapshotId: string, inputUrl: st
         const assetTimeoutMs = Math.min(config.assetFetchTimeoutMs, remainingBudgetMs);
         const { buffer, contentType, finalUrl: assetFinalUrl } = await fetchAsset(assetUrl, config.maxAssetSizeBytes, assetTimeoutMs);
         if (totalBytes + buffer.byteLength > config.maxTotalAssetBytes) {
-          await createCapture(env, snapshotId, 'fetch_asset', 'partial', `${assetUrl}: total asset byte cap reached`);
+          await createCapture(env, snapshotId, 'fetch_asset', 'partial', `${sanitizeUrlForStorage(assetUrl)}: total asset byte cap reached`);
           return;
         }
 
@@ -211,27 +218,31 @@ export async function processSnapshot(env: Env, snapshotId: string, inputUrl: st
         }
 
         const hash = await sha256(body);
+        const finalAssetUrl = new URL(assetFinalUrl);
+        const replayResourcePath = getReplayResourcePath(finalAssetUrl);
+
         await putAsset(env, hash, body, contentType);
-        await putSnapshotResource(env, snapshotId, new URL(assetFinalUrl).pathname, body, contentType);
+        await putSnapshotResource(env, snapshotId, replayResourcePath, body, contentType);
         totalBytes += body.byteLength;
 
-        const replayUrl = `/snapshot/${snapshotId}/resource${new URL(assetFinalUrl).pathname}`;
+        const replayUrl = `/snapshot/${snapshotId}/resource${replayResourcePath}`;
         replacements.set(assetUrl, replayUrl);
         replacements.set(assetFinalUrl, replayUrl);
 
-        const assetRecord: StoredAsset = { url: assetUrl, hash, contentType, size: body.byteLength };
+        const safeAssetUrl = sanitizeUrlForStorage(assetUrl);
+        const assetRecord: StoredAsset = { url: safeAssetUrl, hash, contentType, size: body.byteLength };
         storedAssets.push(assetRecord);
 
         await db.insert(assets).values({
           id: createId('ast'),
           snapshotId,
-          url: assetUrl,
+          url: safeAssetUrl,
           hash,
           contentType,
           size: body.byteLength,
         });
       } catch (error) {
-        await createCapture(env, snapshotId, 'fetch_asset', 'partial', `${assetUrl}: ${String(error)}`);
+        await createCapture(env, snapshotId, 'fetch_asset', 'partial', `${sanitizeUrlForStorage(assetUrl)}: ${String(error)}`);
       }
     }
 
@@ -265,8 +276,8 @@ export async function processSnapshot(env: Env, snapshotId: string, inputUrl: st
             snapshotId,
             {
               id: snapshotId,
-              url: inputUrl,
-              normalizedUrl: normalizeUrl(inputUrl).normalized,
+              url: safeInputUrl,
+              normalizedUrl: safeInputUrl,
               createdAt: new Date().toISOString(),
               status: canStoreHtml ? 'completed' : 'screenshot_only',
               htmlStored: canStoreHtml,
@@ -288,8 +299,8 @@ export async function processSnapshot(env: Env, snapshotId: string, inputUrl: st
       snapshotId,
       {
         id: snapshotId,
-        url: inputUrl,
-        normalizedUrl: normalizeUrl(inputUrl).normalized,
+        url: safeInputUrl,
+        normalizedUrl: safeInputUrl,
         createdAt: new Date().toISOString(),
         status: canStoreHtml ? 'completed' : 'failed',
         htmlStored: canStoreHtml,
@@ -306,8 +317,8 @@ export async function processSnapshot(env: Env, snapshotId: string, inputUrl: st
       snapshotId,
       {
         id: snapshotId,
-        url: inputUrl,
-        normalizedUrl: normalizeUrl(inputUrl).normalized,
+        url: safeInputUrl,
+        normalizedUrl: safeInputUrl,
         createdAt: new Date().toISOString(),
         status: 'failed',
         htmlStored: false,
@@ -349,7 +360,7 @@ export async function createSnapshotRecord(env: Env, inputUrl: string) {
   const snapshotId = createId('snap');
   await db.insert(snapshots).values({
     id: snapshotId,
-    url: inputUrl,
+    url: normalized,
     normalizedUrl: normalized,
     status: 'queued',
   });

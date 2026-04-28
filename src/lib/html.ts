@@ -12,15 +12,25 @@ function unique<T>(items: T[]) {
   return [...new Set(items)];
 }
 
+function decodeHtmlAttribute(value: string) {
+  return value
+    .replace(/&amp;/gi, '&')
+    .replace(/&#38;/g, '&')
+    .replace(/&#x26;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/g, "'");
+}
+
 function addReference(found: AssetReference[], seen: Set<string>, baseUrl: string, attr: string, candidate: string) {
-  const value = candidate.trim();
+  const original = candidate.trim();
+  const value = decodeHtmlAttribute(original);
   if (!value || value.startsWith('data:') || value.startsWith('blob:') || value.startsWith('#')) return;
   const resolved = resolveUrl(baseUrl, value);
   if (!resolved || !/^https?:\/\//i.test(resolved)) return;
-  const key = `${value}:${resolved}`;
+  const key = `${original}:${resolved}`;
   if (seen.has(key)) return;
   seen.add(key);
-  found.push({ attr, original: value, resolved });
+  found.push({ attr, original, resolved });
 }
 
 export function extractAssetReferences(html: string, baseUrl: string) {

@@ -110,4 +110,6 @@ After deployment, Wrangler prints the deployed Worker URL, for example `https://
 - Browser Rendering fallback is optional but wired through `env.BROWSER`
 - Assets are limited by type, count, per-file size, and total size
 - Auth-like pages are skipped by URL heuristic
+- URLs with embedded credentials are rejected, and sensitive query params are redacted before metadata is stored
+- Snapshot replay responses use a sandboxing Content Security Policy that blocks captured JavaScript execution
 - JS replay is not guaranteed; this is intentionally a simple static replay v1
