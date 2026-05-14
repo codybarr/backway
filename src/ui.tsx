@@ -142,6 +142,80 @@ form.addEventListener('submit', async (event) => {
 });
 `;
 
+type ReplaySnapshot = {
+  id: string;
+  url: string;
+  normalizedUrl: string;
+  createdAt: Date;
+  status: string;
+};
+
+const replayShell = `
+:root{--bar:#211b18;--bar-2:#302722;--paper:#fff7ea;--ink:#1f1a17;--muted:#d8cbbc;--accent:#e27a55;--line:rgba(255,247,234,.18)}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:#111;color:var(--paper);font-family:Georgia,Cambria,'Times New Roman',serif}
+body{display:flex;flex-direction:column;overflow:hidden}
+.archive-banner{position:relative;z-index:10;background:linear-gradient(135deg,var(--bar),var(--bar-2));border-bottom:1px solid rgba(0,0,0,.35);box-shadow:0 12px 30px rgba(0,0,0,.28)}
+.archive-details{max-width:1280px;margin:0 auto;padding:0 16px}
+.archive-summary{display:flex;align-items:center;gap:14px;min-height:54px;cursor:pointer;list-style:none}
+.archive-summary::-webkit-details-marker{display:none}
+.archive-toggle{display:grid;place-items:center;width:28px;height:28px;border:1px solid var(--line);border-radius:999px;color:var(--accent);font:700 16px/1 ui-monospace,SFMono-Regular,Menlo,monospace;transition:transform .16s ease}
+.archive-details[open] .archive-toggle{transform:rotate(90deg)}
+.archive-title{font-weight:700;letter-spacing:-.01em;white-space:nowrap}
+.archive-meta{min-width:0;color:var(--muted);font:12px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.archive-panel{padding:0 0 16px 42px}
+.archive-empty{margin:0;color:var(--muted);font-size:14px}
+.archive-list{display:flex;flex-wrap:wrap;gap:8px;margin:0;padding:0;list-style:none}
+.archive-link{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;padding:8px 11px;background:rgba(255,247,234,.08);color:var(--paper);font:12px/1 ui-monospace,SFMono-Regular,Menlo,monospace;text-decoration:none}
+.archive-link:hover{border-color:rgba(226,122,85,.7);background:rgba(226,122,85,.16)}
+.replay-frame{display:block;width:100%;flex:1;border:0;background:#fff;min-height:0}
+@media (max-width:700px){.archive-summary{align-items:flex-start;flex-direction:column;gap:6px;padding:10px 0}.archive-toggle{position:absolute;right:16px;top:12px}.archive-title{padding-right:42px}.archive-meta{width:100%;white-space:normal}.archive-panel{padding:2px 0 14px}.archive-list{display:grid;grid-template-columns:1fr}.archive-link{justify-content:center}}
+`;
+
+function formatSnapshotTimestamp(value: Date) {
+  return value.toISOString().replace('T', ' ').replace('.000Z', ' UTC');
+}
+
+export const ReplayPage: FC<{ snapshot: ReplaySnapshot; previousSnapshots: ReplaySnapshot[] }> = ({ snapshot, previousSnapshots }) => (
+  <html>
+    <head>
+      <meta charSet="utf-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1" />
+      <title>Snapshot {snapshot.id}</title>
+      <style>{replayShell}</style>
+    </head>
+    <body>
+      <header class="archive-banner">
+        <details class="archive-details">
+          <summary class="archive-summary">
+            <span class="archive-toggle" aria-hidden="true">›</span>
+            <span class="archive-title">Backway archive history</span>
+            <span class="archive-meta">
+              Current: {formatSnapshotTimestamp(snapshot.createdAt)} • {snapshot.normalizedUrl}
+            </span>
+          </summary>
+          <div class="archive-panel">
+            {previousSnapshots.length > 0 ? (
+              <ol class="archive-list">
+                {previousSnapshots.map((previous) => (
+                  <li>
+                    <a class="archive-link" href={`/snapshot/${previous.id}/view`} title={previous.normalizedUrl}>
+                      {formatSnapshotTimestamp(previous.createdAt)}
+                    </a>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p class="archive-empty">No previous snapshots for this URL yet.</p>
+            )}
+          </div>
+        </details>
+      </header>
+      <iframe class="replay-frame" src={`/snapshot/${snapshot.id}/content`} title={`Archived snapshot ${snapshot.id}`} />
+    </body>
+  </html>
+);
+
 export const ScreenshotPage: FC<{ snapshotId: string }> = ({ snapshotId }) => (
   <html>
     <head>

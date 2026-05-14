@@ -23,7 +23,7 @@ const REPLAY_CSP = [
   "object-src 'none'",
   "base-uri 'none'",
   "form-action 'none'",
-  "frame-ancestors 'none'",
+  "frame-ancestors 'self'",
 ].join('; ');
 
 export async function securityHeaders(c: Context, next: Next) {
@@ -31,7 +31,9 @@ export async function securityHeaders(c: Context, next: Next) {
 
   c.header('X-Content-Type-Options', 'nosniff');
   c.header('Referrer-Policy', 'strict-origin-when-cross-origin');
-  c.header('X-Frame-Options', 'DENY');
+  if (!c.res.headers.has('X-Frame-Options')) {
+    c.header('X-Frame-Options', 'DENY');
+  }
   c.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
   c.header('Cross-Origin-Resource-Policy', 'same-origin');
 
@@ -42,5 +44,6 @@ export async function securityHeaders(c: Context, next: Next) {
 
 export function setReplaySecurityHeaders(c: Context) {
   c.header('Content-Security-Policy', REPLAY_CSP);
+  c.header('X-Frame-Options', 'SAMEORIGIN');
   c.header('X-Robots-Tag', 'noindex, nofollow, noarchive');
 }

@@ -1,13 +1,19 @@
 /** @jsxImportSource hono/jsx */
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { createSnapshotRecord, getSnapshotDetails, processSnapshot } from './capture';
+import {
+  createSnapshotRecord,
+  getSnapshotDetails,
+  getSnapshotForReplay,
+  listPreviousViewableSnapshots,
+  processSnapshot,
+} from './capture';
 import { isRateLimited } from './lib/rate-limit';
 import { securityHeaders, setReplaySecurityHeaders } from './lib/security';
 import { getAsset, getScreenshot, getSnapshotHtml, getSnapshotMetadata, getSnapshotResource } from './lib/storage';
 import { normalizeUrl, shouldSkipUrl } from './lib/url';
 import type { Env } from './types';
-import { LandingPage, ScreenshotPage } from './ui';
+import { LandingPage, ReplayPage, ScreenshotPage } from './ui';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -41,9 +47,7 @@ app.post('/snapshot', async (c) => {
   }
 
   const record = await createSnapshotRecord(c.env, body.data.url);
-  if (!record.deduped) {
-    c.executionCtx.waitUntil(processSnapshot(c.env, record.snapshotId, body.data.url));
-  }
+  c.executionCtx.waitUntil(processSnapshot(c.env, record.snapshotId, body.data.url));
 
   return c.json(
     {
@@ -51,12 +55,11 @@ app.post('/snapshot', async (c) => {
       snapshot: {
         id: record.snapshotId,
         normalizedUrl,
-        deduped: record.deduped,
         metadataUrl: `/snapshot/${record.snapshotId}`,
         viewUrl: `/snapshot/${record.snapshotId}/view`,
       },
     },
-    record.deduped ? 200 : 202,
+    202,
   );
 });
 
@@ -75,6 +78,22 @@ app.get('/snapshot/:id', async (c) => {
 
 app.get('/snapshot/:id/view', async (c) => {
   const snapshotId = c.req.param('id');
+  const snapshot = await getSnapshotForReplay(c.env, snapshotId);
+  if (!snapshot) return c.json({ error: 'not_found' }, 404);
+
+  const html = await getSnapshotHtml(c.env, snapshotId);
+  const screenshot = html ? null : await getScreenshot(c.env, snapshotId);
+  if (!html && !screenshot) return c.json({ error: 'snapshot_not_ready' }, 404);
+
+  const previousSnapshots = await listPreviousViewableSnapshots(c.env, snapshot);
+  return c.html(<ReplayPage snapshot={snapshot} previousSnapshots={previousSnapshots} />);
+});
+
+app.get('/snapshot/:id/content', async (c) => {
+  const snapshotId = c.req.param('id');
+  const snapshot = await getSnapshotForReplay(c.env, snapshotId);
+  if (!snapshot) return c.json({ error: 'not_found' }, 404);
+
   const html = await getSnapshotHtml(c.env, snapshotId);
   if (html) {
     setReplaySecurityHeaders(c);
@@ -84,6 +103,7 @@ app.get('/snapshot/:id/view', async (c) => {
 
   const screenshot = await getScreenshot(c.env, snapshotId);
   if (screenshot) {
+    setReplaySecurityHeaders(c);
     return c.html(<ScreenshotPage snapshotId={snapshotId} />);
   }
 

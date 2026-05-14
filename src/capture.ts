@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray, lt } from 'drizzle-orm';
 import { getDb } from './db/client';
 import { assets, captures, snapshots } from './db/schema';
 import {
@@ -345,19 +345,50 @@ export async function getSnapshotDetails(env: Env, snapshotId: string) {
   return { snapshot, assets: snapshotAssets, captures: snapshotCaptures };
 }
 
+export async function getSnapshotForReplay(env: Env, snapshotId: string) {
+  const db = getDb(env);
+  const [snapshot] = await db
+    .select({
+      id: snapshots.id,
+      url: snapshots.url,
+      normalizedUrl: snapshots.normalizedUrl,
+      createdAt: snapshots.createdAt,
+      status: snapshots.status,
+    })
+    .from(snapshots)
+    .where(eq(snapshots.id, snapshotId))
+    .limit(1);
+
+  return snapshot ?? null;
+}
+
+export async function listPreviousViewableSnapshots(env: Env, currentSnapshot: { id: string; normalizedUrl: string; createdAt: Date }, limit = 25) {
+  const db = getDb(env);
+  return db
+    .select({
+      id: snapshots.id,
+      url: snapshots.url,
+      normalizedUrl: snapshots.normalizedUrl,
+      createdAt: snapshots.createdAt,
+      status: snapshots.status,
+    })
+    .from(snapshots)
+    .where(
+      and(
+        eq(snapshots.normalizedUrl, currentSnapshot.normalizedUrl),
+        lt(snapshots.createdAt, currentSnapshot.createdAt),
+        inArray(snapshots.status, ['completed', 'screenshot_only']),
+      ),
+    )
+    .orderBy(desc(snapshots.createdAt))
+    .limit(limit);
+}
+
 export async function createSnapshotRecord(env: Env, inputUrl: string) {
   const db = getDb(env);
   const { normalized } = normalizeUrl(inputUrl);
-  const [existing] = await db
-    .select()
-    .from(snapshots)
-    .where(and(eq(snapshots.normalizedUrl, normalized), eq(snapshots.status, 'completed')))
-    .orderBy(desc(snapshots.createdAt))
-    .limit(1);
-
-  if (existing) return { snapshotId: existing.id, normalizedUrl: normalized, deduped: true };
-
   const snapshotId = createId('snap');
+
   await db.insert(snapshots).values({
     id: snapshotId,
     url: normalized,
@@ -366,5 +397,5 @@ export async function createSnapshotRecord(env: Env, inputUrl: string) {
   });
   await db.insert(captures).values({ id: createId('cap'), snapshotId, method: 'enqueue', status: 'queued', error: null });
 
-  return { snapshotId, normalizedUrl: normalized, deduped: false };
+  return { snapshotId, normalizedUrl: normalized };
 }
